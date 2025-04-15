@@ -67,7 +67,7 @@ public class AddressServiceImpl implements AddressService {
         );
 
         addressFromDB.setStreet(addressDTO.getStreet());
-        addressFromDB.setBuildingName(addressDTO.getBuildingName());
+        addressFromDB.setApartmentNumber(addressDTO.getApartmentNumber());
         addressFromDB.setCity(addressDTO.getCity());
         addressFromDB.setState(addressDTO.getState());
         addressFromDB.setZipCode(addressDTO.getZipCode());

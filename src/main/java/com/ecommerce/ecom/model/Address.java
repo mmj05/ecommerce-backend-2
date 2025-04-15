@@ -23,9 +23,7 @@ public class Address {
     @Size(min = 5, message = "Street should have atleast 5 characters")
     private String street;
 
-    @NotBlank
-    @Size(min = 5, message = "Building name should have atleast 5 characters")
-    private String buildingName;
+    private String apartmentNumber;
 
     @NotBlank
     @Size(min = 4, message = "City name should have atleast 4 characters")
@@ -48,12 +46,12 @@ public class Address {
     @JoinColumn(name = "user_id")
     private User user;
 
-    public Address(String zipCode, String country, String state, String city, String buildingName, String street) {
+    public Address(String zipCode, String country, String state, String city, String apartmentNumber, String street) {
         this.zipCode = zipCode;
         this.country = country;
         this.state = state;
         this.city = city;
-        this.buildingName = buildingName;
+        this.apartmentNumber = apartmentNumber;
         this.street = street;
     }
 }
