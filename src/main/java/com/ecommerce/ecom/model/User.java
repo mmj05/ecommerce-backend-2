@@ -4,7 +4,7 @@ import jakarta.persistence.*;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
-import lombok.*;
+import lombok.*; // Import EqualsAndHashCode specifically if not using wildcard
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -12,7 +12,9 @@ import java.util.List;
 import java.util.Set;
 
 @Entity
-@Data
+// Consider replacing @Data with specific annotations if you need more control
+// Like @Getter @Setter @ToString @NoArgsConstructor etc.
+@Data // Includes @EqualsAndHashCode by default
 @NoArgsConstructor
 @Table(name = "users",
         uniqueConstraints = {
@@ -53,21 +55,23 @@ public class User {
     @JoinTable(name = "user_role",
             joinColumns = @JoinColumn(name = "user_id"),
             inverseJoinColumns = @JoinColumn(name = "role_id"))
+    @EqualsAndHashCode.Exclude // Exclude collection
     private Set<Role> roles = new HashSet<>();
 
     @Getter
     @Setter
     @OneToMany(mappedBy = "user", cascade = {CascadeType.PERSIST, CascadeType.MERGE})
+    @EqualsAndHashCode.Exclude // Exclude collection
     private List<Address> addresses = new ArrayList<>();
 
     @ToString.Exclude
+    @EqualsAndHashCode.Exclude // *** Add this exclusion ***
     @OneToOne(mappedBy = "user", cascade = {CascadeType.PERSIST, CascadeType.MERGE})
     private Cart cart;
 
     @ToString.Exclude
+    @EqualsAndHashCode.Exclude // Exclude collection
     @OneToMany(mappedBy = "user", cascade = {CascadeType.PERSIST, CascadeType.MERGE},
             orphanRemoval = true)
     private Set<Product> products;
-
-
 }
