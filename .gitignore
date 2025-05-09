@@ -1,0 +1,5 @@
+# macOS system file
+.DS_Store
+
+# Maven or build directory
+target/
