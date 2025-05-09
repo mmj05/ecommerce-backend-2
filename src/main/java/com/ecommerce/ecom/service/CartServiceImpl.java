@@ -52,9 +52,36 @@ public class CartServiceImpl implements CartService {
     @PersistenceContext
     private EntityManager entityManager;
 
+    /**
+     * Recalculates the total price of a cart based on its items
+     * This ensures the price is always correct regardless of past operations
+     *
+     * @param cart The cart to recalculate totals for
+     * @return The updated cart with correct total price
+     */
+    private Cart recalculateCartTotal(Cart cart) {
+        if (cart == null) return null;
+
+        double totalPrice = 0.0;
+
+        // Calculate total based on current items in cart
+        for (CartItem item : cart.getCartItems()) {
+            if (item.getProduct() != null) {
+                // Use the item's stored product price (which should reflect special price)
+                totalPrice += item.getProductPrice() * item.getQuantity();
+            }
+        }
+
+        // Ensure precision - round to 2 decimal places
+        totalPrice = Math.round(totalPrice * 100.0) / 100.0;
+
+        // Set the new total and save the cart
+        cart.setTotalPrice(totalPrice);
+        return cartRepository.save(cart);
+    }
+
     @Override
     public CartDTO addProductToCart(Long productId, Integer quantity) {
-
         Cart cart = createCart();
 
         Product product = productRepository.findById(productId)
@@ -63,57 +90,58 @@ public class CartServiceImpl implements CartService {
         CartItem cartItem = cartItemRepository.findCartItemByProductIdAndCartId(cart.getCartId(), productId);
 
         if (cartItem != null) {
-            throw new APIException("Product " + product.getProductName() + " already exists in the cart");
+            // Instead of throwing exception, update existing item
+            logger.info("Product {} already exists in the cart, updating quantity", product.getProductName());
+            cartItem.setQuantity(cartItem.getQuantity() + quantity);
+            cartItem.setProductPrice(product.getSpecialPrice());
+            cartItem.setDiscount(product.getDiscount());
+            cartItemRepository.save(cartItem);
+        } else {
+            // Check product availability
+            if (product.getQuantity() == 0) {
+                throw new APIException(product.getProductName() + " is not available");
+            }
+
+            if (product.getQuantity() < quantity) {
+                throw new APIException("Please, make an order of the " + product.getProductName()
+                        + " less than or equal to the quantity " + product.getQuantity() + ".");
+            }
+
+            // Create new cart item
+            CartItem newCartItem = new CartItem();
+            newCartItem.setProduct(product);
+            newCartItem.setCart(cart);
+            newCartItem.setQuantity(quantity);
+            newCartItem.setDiscount(product.getDiscount());
+            newCartItem.setProductPrice(product.getSpecialPrice());
+            cartItemRepository.save(newCartItem);
         }
 
-        if (product.getQuantity() == 0) {
-            throw new APIException(product.getProductName() + " is not available");
-        }
+        // Recalculate cart total instead of manually adding
+        cart = recalculateCartTotal(cart);
 
-        if (product.getQuantity() < quantity) {
-            throw new APIException("Please, make an order of the " + product.getProductName()
-                    + " less than or equal to the quantity " + product.getQuantity() + ".");
-        }
-
-        CartItem newCartItem = new CartItem();
-
-        newCartItem.setProduct(product);
-        newCartItem.setCart(cart);
-        newCartItem.setQuantity(quantity);
-        newCartItem.setDiscount(product.getDiscount());
-        newCartItem.setProductPrice(product.getSpecialPrice());
-
-        cartItemRepository.save(newCartItem);
-
-        product.setQuantity(product.getQuantity());
-
-        cart.setTotalPrice(cart.getTotalPrice() + (product.getSpecialPrice() * quantity));
-
-        cartRepository.save(cart);
-
+        // Map to DTO and return
         CartDTO cartDTO = modelMapper.map(cart, CartDTO.class);
-
         List<CartItem> cartItems = cart.getCartItems();
-
         Stream<ProductDTO> productStream = cartItems.stream().map(item -> {
             ProductDTO map = modelMapper.map(item.getProduct(), ProductDTO.class);
             map.setQuantity(item.getQuantity());
             return map;
         });
-
         cartDTO.setProducts(productStream.toList());
-
         return cartDTO;
-
     }
 
     @Override
     public List<CartDTO> getAllCarts() {
         List<Cart> carts = cartRepository.findAll();
 
-        if (carts.size() == 0) {
+        if (carts.isEmpty()) {
             throw new APIException("No cart found");
         }
+
+        // Check totals for all carts and fix if needed
+        carts.forEach(this::recalculateCartTotal);
 
         List<CartDTO> cartDTOs = carts.stream().map(cart -> {
             CartDTO cartDTO = modelMapper.map(cart, CartDTO.class);
@@ -144,13 +172,15 @@ public class CartServiceImpl implements CartService {
             return emptyCart;
         }
 
+        // Ensure cart total is accurate
+        cart = recalculateCartTotal(cart);
+
         cart.getCartItems().forEach(c -> c.getProduct().setQuantity(c.getQuantity()));
 
         List<ProductDTO> products = cart.getCartItems().stream()
                 .map(p -> modelMapper.map(p.getProduct(), ProductDTO.class)).toList();
 
         CartDTO cartDTO = modelMapper.map(cart, CartDTO.class);
-
         cartDTO.setProducts(products);
 
         return cartDTO;
@@ -184,29 +214,26 @@ public class CartServiceImpl implements CartService {
             throw new APIException("Product " + product.getProductName() + " not available in the cart!!!");
         }
 
+        // Update cart item properties
         cartItem.setProductPrice(product.getSpecialPrice());
         cartItem.setQuantity(cartItem.getQuantity() + quantity);
         cartItem.setDiscount(product.getDiscount());
-        cart.setTotalPrice(cart.getTotalPrice() + (cartItem.getProductPrice() * quantity));
-        cartRepository.save(cart);
-        CartItem updatedItem = cartItemRepository.save(cartItem);
 
-        if(updatedItem.getQuantity() <= 0){
-            cartItemRepository.deleteById(updatedItem.getCartItemId());
-        }
+        // Save cart item first
+        cartItemRepository.save(cartItem);
 
+        // Recalculate cart total instead of manually adding
+        cart = recalculateCartTotal(cart);
+
+        // Map to DTO and return
         CartDTO cartDTO = modelMapper.map(cart, CartDTO.class);
-
         List<CartItem> cartItems = cart.getCartItems();
-
         Stream<ProductDTO> productStream = cartItems.stream().map(item -> {
             ProductDTO prd = modelMapper.map(item.getProduct(), ProductDTO.class);
             prd.setQuantity(item.getQuantity());
             return prd;
         });
-
         cartDTO.setProducts(productStream.toList());
-
         return cartDTO;
     }
 
@@ -247,25 +274,27 @@ public class CartServiceImpl implements CartService {
             }
 
             cartItem.setQuantity(cartItem.getQuantity() + 1);
-            cart.setTotalPrice(cart.getTotalPrice() + cartItem.getProductPrice());
         } else if ("decrease".equalsIgnoreCase(operation)) {
             if (cartItem.getQuantity() <= 1) {
                 // Remove item if quantity would be 0 or less
-                cart.setTotalPrice(cart.getTotalPrice() - cartItem.getProductPrice());
                 cartItemRepository.deleteById(cartItem.getCartItemId());
                 cart.getCartItems().remove(cartItem);
             } else {
                 cartItem.setQuantity(cartItem.getQuantity() - 1);
-                cart.setTotalPrice(cart.getTotalPrice() - cartItem.getProductPrice());
             }
         } else if ("delete".equalsIgnoreCase(operation)) {
             // Remove item completely
-            cart.setTotalPrice(cart.getTotalPrice() - (cartItem.getProductPrice() * cartItem.getQuantity()));
             cartItemRepository.deleteById(cartItem.getCartItemId());
             cart.getCartItems().remove(cartItem);
         }
 
-        cartRepository.save(cart);
+        // Save any item changes if the item wasn't deleted
+        if (!"delete".equalsIgnoreCase(operation) && cartItem.getQuantity() > 0) {
+            cartItemRepository.save(cartItem);
+        }
+
+        // Recalculate cart total
+        cart = recalculateCartTotal(cart);
 
         // If cart is now empty, return a CartDTO with empty products list
         if (cart.getCartItems().isEmpty()) {
@@ -276,18 +305,19 @@ public class CartServiceImpl implements CartService {
             return emptyCartDTO;
         }
 
+        // Map to DTO and return
         CartDTO cartDTO = modelMapper.map(cart, CartDTO.class);
-
         List<ProductDTO> products = cart.getCartItems().stream().map(item -> {
             ProductDTO prd = modelMapper.map(item.getProduct(), ProductDTO.class);
             prd.setQuantity(item.getQuantity());
             return prd;
         }).toList();
-
         cartDTO.setProducts(products);
-
         return cartDTO;
     }
+
+    // Rest of the methods remain the same but should use recalculateCartTotal
+    // instead of manual price calculations
 
     private Cart createCart() {
         Cart userCart = cartRepository.findCartByEmail(authUtil.loggedInEmail());
@@ -318,15 +348,14 @@ public class CartServiceImpl implements CartService {
         // Get product information before deleting for the return message
         String productName = cartItem.getProduct().getProductName();
 
-        // Update total price
-        cart.setTotalPrice(cart.getTotalPrice() -
-                (cartItem.getProductPrice() * cartItem.getQuantity()));
-
         // Remove the cart item
         cartItemRepository.deleteCartItemByProductIdAndCartId(cartId, productId);
 
         // Force a flush to ensure changes are written to the database
         entityManager.flush();
+
+        // Recalculate cart total after removing item
+        cart = recalculateCartTotal(cart);
 
         // Check if cart is now empty after removing the item
         Long remainingItems = cartItemRepository.countByCartId(cartId);
@@ -340,6 +369,9 @@ public class CartServiceImpl implements CartService {
 
         return "Product " + productName + " removed from the cart";
     }
+
+    // The deleteEmptyCart and updateProductInCarts methods should also use recalculateCartTotal
+    // for consistent cart pricing
 
     @Transactional
     @Override
@@ -382,7 +414,6 @@ public class CartServiceImpl implements CartService {
         }
     }
 
-
     @Override
     public void updateProductInCarts(Long cartId, Long productId) {
         Cart cart = cartRepository.findById(cartId)
@@ -397,14 +428,11 @@ public class CartServiceImpl implements CartService {
             throw new APIException("Product " + product.getProductName() + " not available in the cart!!!");
         }
 
-        double cartPrice = cart.getTotalPrice()
-                - (cartItem.getProductPrice() * cartItem.getQuantity());
-
+        // Update cart item price
         cartItem.setProductPrice(product.getSpecialPrice());
+        cartItemRepository.save(cartItem);
 
-        cart.setTotalPrice(cartPrice
-                + (cartItem.getProductPrice() * cartItem.getQuantity()));
-
-        cartItem = cartItemRepository.save(cartItem);
+        // Recalculate cart total
+        recalculateCartTotal(cart);
     }
 }
