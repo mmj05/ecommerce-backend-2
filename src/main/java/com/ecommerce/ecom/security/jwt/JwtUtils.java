@@ -34,8 +34,16 @@ public class JwtUtils {
     public String getJwtFromCookies(HttpServletRequest request) {
         Cookie cookie = WebUtils.getCookie(request, jwtCookie);
         if (cookie != null) {
+            logger.info("Found JWT cookie");
             return cookie.getValue();
         } else {
+            // Try to get JWT from Authorization header as fallback
+            String headerAuth = request.getHeader("Authorization");
+            if (headerAuth != null && headerAuth.startsWith("Bearer ")) {
+                logger.info("Found JWT in Authorization header");
+                return headerAuth.substring(7);
+            }
+            logger.warn("No JWT found in cookies or headers");
             return null;
         }
     }
