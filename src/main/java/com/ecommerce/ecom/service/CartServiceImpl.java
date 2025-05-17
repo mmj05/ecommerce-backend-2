@@ -62,13 +62,22 @@ public class CartServiceImpl implements CartService {
     private Cart recalculateCartTotal(Cart cart) {
         if (cart == null) return null;
 
+        // Get fresh cart data from database to avoid stale collections
+        Long cartId = cart.getCartId();
+        cart = cartRepository.findById(cartId).orElse(cart);
+
         double totalPrice = 0.0;
 
         // Calculate total based on current items in cart
-        for (CartItem item : cart.getCartItems()) {
-            if (item.getProduct() != null) {
-                // Use the item's stored product price (which should reflect special price)
-                totalPrice += item.getProductPrice() * item.getQuantity();
+        if (cart.getCartItems() != null && !cart.getCartItems().isEmpty()) {
+            // Use a new ArrayList to avoid ConcurrentModificationException
+            List<CartItem> items = new ArrayList<>(cart.getCartItems());
+
+            for (CartItem item : items) {
+                if (item.getProduct() != null) {
+                    // Use the item's stored product price (which should reflect special price)
+                    totalPrice += item.getProductPrice() * item.getQuantity();
+                }
             }
         }
 
@@ -339,13 +348,13 @@ public class CartServiceImpl implements CartService {
         Cart cart = cartRepository.findById(cartId)
                 .orElseThrow(() -> new ResourceNotFoundException("Cart", "cartId", cartId));
 
+        // Get product information before deleting for the return message
         CartItem cartItem = cartItemRepository.findCartItemByProductIdAndCartId(cartId, productId);
 
         if (cartItem == null) {
             throw new ResourceNotFoundException("Product", "productId", productId);
         }
 
-        // Get product information before deleting for the return message
         String productName = cartItem.getProduct().getProductName();
 
         // Remove the cart item
@@ -354,10 +363,23 @@ public class CartServiceImpl implements CartService {
         // Force a flush to ensure changes are written to the database
         entityManager.flush();
 
-        // Recalculate cart total after removing item
-        cart = recalculateCartTotal(cart);
+        // IMPORTANT: Don't use the cart.getCartItems() collection after deletion
+        // Instead, re-fetch the cart from the database to get fresh state
+        cart = cartRepository.findById(cartId)
+                .orElseThrow(() -> new ResourceNotFoundException("Cart", "cartId", cartId));
 
-        // Check if cart is now empty after removing the item
+        // Recalculate cart total and update in database
+        double totalPrice = 0.0;
+        if (cart.getCartItems() != null && !cart.getCartItems().isEmpty()) {
+            totalPrice = cart.getCartItems().stream()
+                    .mapToDouble(item -> item.getProductPrice() * item.getQuantity())
+                    .sum();
+        }
+
+        cart.setTotalPrice(totalPrice);
+        cartRepository.save(cart);
+
+        // Check if cart is empty based on count from database
         Long remainingItems = cartItemRepository.countByCartId(cartId);
         logger.info("Remaining items in cart after deletion: {}", remainingItems);
 
