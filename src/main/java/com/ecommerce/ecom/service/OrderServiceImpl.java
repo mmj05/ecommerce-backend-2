@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Service
 public class OrderServiceImpl implements OrderService {
@@ -78,7 +79,11 @@ public class OrderServiceImpl implements OrderService {
 
         // Convert Cart Items to Order Items
         List<OrderItem> orderItems = new ArrayList<>();
-        for (CartItem cartItem : cart.getCartItems()) {
+
+        // IMPORTANT: Create a copy of cart items to avoid ConcurrentModificationException
+        List<CartItem> cartItemsCopy = new ArrayList<>(cart.getCartItems());
+
+        for (CartItem cartItem : cartItemsCopy) {
             Product product = cartItem.getProduct();
             int orderedQuantity = cartItem.getQuantity();
 
@@ -103,8 +108,25 @@ public class OrderServiceImpl implements OrderService {
 
         orderItemRepository.saveAll(orderItems);
 
-        // Clear cart after order placement
-        cart.getCartItems().forEach(item -> cartService.deleteProductFromCart(cart.getCartId(), item.getProduct().getProductId()));
+        // Clear cart after order placement - FIXED to avoid ConcurrentModificationException
+        // Method 1: Store product IDs first, then delete
+        List<Long> productIdsToRemove = cartItemsCopy.stream()
+                .map(item -> item.getProduct().getProductId())
+                .collect(Collectors.toList());
+
+        // Then delete each product using the stored IDs
+        for (Long productId : productIdsToRemove) {
+            cartService.deleteProductFromCart(cart.getCartId(), productId);
+        }
+
+        // Method 2 (Alternative): Clear cart items directly using repository
+        // This is more efficient if you don't need the deleteProductFromCart logic
+    /*
+    cartItemRepository.deleteAllInBatch(cart.getCartItems());
+    cart.getCartItems().clear();
+    cart.setTotalPrice(0.0);
+    cartRepository.save(cart);
+    */
 
         // Convert Order to DTO
         OrderDTO orderDTO = modelMapper.map(savedOrder, OrderDTO.class);
