@@ -22,4 +22,14 @@ public interface ProductService {
     ProductDTO updateProductImage(Long productId, MultipartFile image) throws IOException;
 
     ProductDTO getProductById(Long productId);
+
+    // Get products for the current seller
+    ProductResponse getSellerProducts(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder);
+
+    // Check ownership and permissions
+    boolean isProductOwner(Long productId);
+
+    boolean canCurrentUserEditProduct(Long productId);
+
+    boolean canCurrentUserDeleteProduct(Long productId);
 }
