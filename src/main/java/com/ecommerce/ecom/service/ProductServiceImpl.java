@@ -2,15 +2,14 @@ package com.ecommerce.ecom.service;
 
 import com.ecommerce.ecom.exceptions.APIException;
 import com.ecommerce.ecom.exceptions.ResourceNotFoundException;
-import com.ecommerce.ecom.model.Cart;
-import com.ecommerce.ecom.model.Category;
-import com.ecommerce.ecom.model.Product;
+import com.ecommerce.ecom.model.*;
 import com.ecommerce.ecom.payload.CartDTO;
 import com.ecommerce.ecom.payload.ProductDTO;
 import com.ecommerce.ecom.payload.ProductResponse;
 import com.ecommerce.ecom.repositories.CartRepository;
 import com.ecommerce.ecom.repositories.CategoryRepository;
 import com.ecommerce.ecom.repositories.ProductRepository;
+import com.ecommerce.ecom.util.AuthUtil;
 import org.modelmapper.ModelMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -18,6 +17,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -45,7 +46,10 @@ public class ProductServiceImpl implements ProductService {
     @Autowired
     private FileService fileService;
 
-    @Value("{project.image}")
+    @Autowired
+    private AuthUtil authUtil;
+
+    @Value("${project.image}")
     private String path;
 
     @Override
@@ -68,6 +72,11 @@ public class ProductServiceImpl implements ProductService {
             Product product = modelMapper.map(productDTO, Product.class);
             product.setImage("default.png");
             product.setCategory(category);
+
+            // Set the current user as the seller/owner of this product
+            User currentUser = authUtil.loggedInUser();
+            product.setUser(currentUser);
+
             double specialPrice = product.getPrice() - (product.getPrice() * product.getDiscount() / 100);
             product.setSpecialPrice(specialPrice);
             Product productDB = productRepository.save(product);
@@ -75,13 +84,10 @@ public class ProductServiceImpl implements ProductService {
         } else {
             throw new APIException("Product already exists in the category");
         }
-
-
     }
 
     @Override
     public ProductResponse getAllProducts(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder) {
-
         Sort sortByAndOrder = sortOrder.equalsIgnoreCase("asc")
                 ? Sort.by(sortBy).ascending()
                 : Sort.by(sortBy).descending();
@@ -103,7 +109,6 @@ public class ProductServiceImpl implements ProductService {
 
     @Override
     public ProductResponse getProductsByCategory(Long categoryId, Integer pageNumber, Integer pageSize, String sortBy, String sortOrder) {
-
         Category category = categoryRepository.findById(categoryId)
                 .orElseThrow(() -> new ResourceNotFoundException("Category", "categoryId", categoryId));
 
@@ -127,7 +132,6 @@ public class ProductServiceImpl implements ProductService {
 
     @Override
     public ProductResponse getProductsByKeyWord(String keyWord, Integer pageNumber, Integer pageSize, String sortBy, String sortOrder) {
-
         Sort sortByAndOrder = sortOrder.equalsIgnoreCase("asc")
                 ? Sort.by(sortBy).ascending()
                 : Sort.by(sortBy).descending();
@@ -151,6 +155,11 @@ public class ProductServiceImpl implements ProductService {
         Product product = productRepository.findById(productId)
                 .orElseThrow(() -> new ResourceNotFoundException("Product", "productId", productId));
 
+        // Check if current user can delete this product
+        if (!canCurrentUserDeleteProduct(productId)) {
+            throw new APIException("You are not authorized to delete this product");
+        }
+
         List<Cart> carts = cartRepository.findCartsByProductId(productId);
         carts.forEach(cart -> cartService.deleteProductFromCart(cart.getCartId(), productId));
 
@@ -162,6 +171,12 @@ public class ProductServiceImpl implements ProductService {
     public ProductDTO updateProduct(ProductDTO productDTO, Long productId) {
         Product product = productRepository.findById(productId)
                 .orElseThrow(() -> new ResourceNotFoundException("Product", "productId", productId));
+
+        // Check if current user can edit this product
+        if (!canCurrentUserEditProduct(productId)) {
+            throw new APIException("You are not authorized to edit this product");
+        }
+
         product.setProductName(productDTO.getProductName());
         product.setDescription(productDTO.getDescription());
         product.setQuantity(productDTO.getQuantity());
@@ -202,12 +217,71 @@ public class ProductServiceImpl implements ProductService {
         Product product = productRepository.findById(productId)
                 .orElseThrow(() -> new ResourceNotFoundException("Product", "productId", productId));
 
+        // Check if current user can edit this product
+        if (!canCurrentUserEditProduct(productId)) {
+            throw new APIException("You are not authorized to update this product's image");
+        }
+
         String filename = fileService.uploadImage(path, image);
         product.setImage(filename);
         Product productDB = productRepository.save(product);
         return modelMapper.map(productDB, ProductDTO.class);
     }
 
+    @Override
+    public ProductResponse getSellerProducts(Integer pageNumber, Integer pageSize, String sortBy, String sortOrder) {
+        User currentUser = authUtil.loggedInUser();
 
+        Sort sortByAndOrder = sortOrder.equalsIgnoreCase("asc")
+                ? Sort.by(sortBy).ascending()
+                : Sort.by(sortBy).descending();
+        Pageable pageable = PageRequest.of(pageNumber, pageSize, sortByAndOrder);
 
+        Page<Product> productPage = productRepository.findByUser(currentUser, pageable);
+
+        List<Product> products = productPage.getContent();
+        List<ProductDTO> productDTOs = products.stream()
+                .map(product -> modelMapper.map(product, ProductDTO.class)).toList();
+
+        ProductResponse productResponse = new ProductResponse();
+        productResponse.setContent(productDTOs);
+        productResponse.setPageNumber(productPage.getNumber());
+        productResponse.setPageSize(productPage.getSize());
+        productResponse.setTotalElements(productPage.getTotalElements());
+        productResponse.setTotalPages(productPage.getTotalPages());
+        productResponse.setLastPage(productPage.isLast());
+
+        return productResponse;
+    }
+
+    @Override
+    public boolean isProductOwner(Long productId) {
+        Product product = productRepository.findById(productId)
+                .orElseThrow(() -> new ResourceNotFoundException("Product", "productId", productId));
+
+        User currentUser = authUtil.loggedInUser();
+        return product.getUser() != null && product.getUser().getUserId().equals(currentUser.getUserId());
+    }
+
+    @Override
+    public boolean canCurrentUserEditProduct(Long productId) {
+        // Only the product owner (seller) can edit product details
+        return isProductOwner(productId);
+    }
+
+    @Override
+    public boolean canCurrentUserDeleteProduct(Long productId) {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+
+        // Admin can delete any product
+        boolean isAdmin = authentication.getAuthorities().stream()
+                .anyMatch(authority -> authority.getAuthority().equals("ROLE_ADMIN"));
+
+        if (isAdmin) {
+            return true;
+        }
+
+        // Seller can only delete their own products
+        return isProductOwner(productId);
+    }
 }
