@@ -12,6 +12,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configuration.WebSecurityCustomizer;
@@ -31,7 +32,7 @@ import java.util.Set;
 
 @Configuration
 @EnableWebSecurity
-//@EnableMethodSecurity
+@EnableMethodSecurity(prePostEnabled = true) // Enable method-level security
 public class WebSecurityConfig {
     @Autowired
     UserDetailsServiceImpl userDetailsService;
@@ -44,7 +45,6 @@ public class WebSecurityConfig {
         return new AuthTokenFilter();
     }
 
-
     @Bean
     public DaoAuthenticationProvider authenticationProvider() {
         DaoAuthenticationProvider authProvider = new DaoAuthenticationProvider();
@@ -54,7 +54,6 @@ public class WebSecurityConfig {
 
         return authProvider;
     }
-
 
     @Bean
     public AuthenticationManager authenticationManager(AuthenticationConfiguration authConfig) throws Exception {
@@ -66,26 +65,25 @@ public class WebSecurityConfig {
         return new BCryptPasswordEncoder();
     }
 
-
-
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http.cors(cors -> cors.configurationSource(request -> {
-            CorsConfiguration configuration = new CorsConfiguration();
-            configuration.setAllowedOrigins(Arrays.asList("http://localhost:5173", "http://localhost:3000"));
-            configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
-            configuration.setAllowedHeaders(Arrays.asList("*"));
-            configuration.setAllowCredentials(true);
-            return configuration;
-        }))
-        .csrf(csrf -> csrf.disable())
+                    CorsConfiguration configuration = new CorsConfiguration();
+                    configuration.setAllowedOrigins(Arrays.asList("http://localhost:5173", "http://localhost:3000"));
+                    configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+                    configuration.setAllowedHeaders(Arrays.asList("*"));
+                    configuration.setAllowCredentials(true);
+                    return configuration;
+                }))
+                .csrf(csrf -> csrf.disable())
                 .exceptionHandling(exception -> exception.authenticationEntryPoint(unauthorizedHandler))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth ->
                         auth.requestMatchers("/api/auth/**").permitAll()
                                 .requestMatchers("/v3/api-docs/**").permitAll()
                                 .requestMatchers("/h2-console/**").permitAll()
-                                .requestMatchers("/api/admin/**").permitAll()
+                                .requestMatchers("/api/admin/**").hasAnyRole("ADMIN", "SELLER")
+                                .requestMatchers("/api/seller/**").hasAnyRole("SELLER", "ADMIN")
                                 .requestMatchers("/api/public/**").permitAll()
                                 .requestMatchers("/swagger-ui/**").permitAll()
                                 .requestMatchers("/api/test/**").permitAll()
@@ -136,37 +134,45 @@ public class WebSecurityConfig {
             Set<Role> sellerRoles = Set.of(sellerRole, userRole);
             Set<Role> adminRoles = Set.of(userRole, sellerRole, adminRole);
 
-
             // Create users if not already present
             if (!userRepository.existsByUsername("user1")) {
                 User user1 = new User("user1", "user1@example.com", passwordEncoder.encode("password1"));
+                user1.setRoles(userRoles);
                 userRepository.save(user1);
             }
 
             if (!userRepository.existsByUsername("seller1")) {
                 User seller1 = new User("seller1", "seller1@example.com", passwordEncoder.encode("password2"));
+                seller1.setRoles(sellerRoles);
                 userRepository.save(seller1);
             }
 
             if (!userRepository.existsByUsername("admin")) {
                 User admin = new User("admin", "admin@example.com", passwordEncoder.encode("adminPass"));
+                admin.setRoles(adminRoles);
                 userRepository.save(admin);
             }
 
-            // Update roles for existing users
+            // Update roles for existing users if they don't have roles set
             userRepository.findByUsername("user1").ifPresent(user -> {
-                user.setRoles(userRoles);
-                userRepository.save(user);
+                if (user.getRoles().isEmpty()) {
+                    user.setRoles(userRoles);
+                    userRepository.save(user);
+                }
             });
 
             userRepository.findByUsername("seller1").ifPresent(seller -> {
-                seller.setRoles(sellerRoles);
-                userRepository.save(seller);
+                if (seller.getRoles().isEmpty()) {
+                    seller.setRoles(sellerRoles);
+                    userRepository.save(seller);
+                }
             });
 
             userRepository.findByUsername("admin").ifPresent(admin -> {
-                admin.setRoles(adminRoles);
-                userRepository.save(admin);
+                if (admin.getRoles().isEmpty()) {
+                    admin.setRoles(adminRoles);
+                    userRepository.save(admin);
+                }
             });
         };
     }
