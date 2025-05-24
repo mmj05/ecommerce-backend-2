@@ -17,7 +17,9 @@ public class OrderDTO {
     private List<OrderItemDTO> orderItemDTOs = new ArrayList<>();
     private LocalDate orderDate;
     private PaymentDTO paymentDTO;
+    private AddressDTO addressDTO;
     private Double totalAmount;
     private String orderStatus;
     private Long addressId;
+    private Double sellerTotal; // Total amount for seller's products only
 }
