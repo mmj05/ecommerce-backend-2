@@ -1,12 +1,6 @@
 package com.ecommerce.ecom.security;
 
-import com.ecommerce.ecom.model.AppRole;
-import com.ecommerce.ecom.model.Role;
-import com.ecommerce.ecom.model.User;
-import com.ecommerce.ecom.repositories.RoleRepository;
-import com.ecommerce.ecom.repositories.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -28,7 +22,6 @@ import com.ecommerce.ecom.security.services.UserDetailsServiceImpl;
 import org.springframework.web.cors.CorsConfiguration;
 
 import java.util.Arrays;
-import java.util.Set;
 
 @Configuration
 @EnableWebSecurity
@@ -112,33 +105,5 @@ public class WebSecurityConfig {
                 .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html");
     }
 
-    @Bean
-    public CommandLineRunner initData(RoleRepository roleRepository, UserRepository userRepository, PasswordEncoder passwordEncoder) {
-        return args -> {
-            // Initialize default roles if they don't exist
-            if (roleRepository.findByRoleName(AppRole.ROLE_USER).isEmpty()) {
-                roleRepository.save(new Role(AppRole.ROLE_USER));
-            }
-            if (roleRepository.findByRoleName(AppRole.ROLE_ADMIN).isEmpty()) {
-                roleRepository.save(new Role(AppRole.ROLE_ADMIN));
-            }
-            if (roleRepository.findByRoleName(AppRole.ROLE_SELLER).isEmpty()) {
-                roleRepository.save(new Role(AppRole.ROLE_SELLER));
-            }
 
-            // Create default admin user if not exists
-            if (!userRepository.existsByUsername("admin")) {
-                User admin = new User();
-                admin.setUsername("admin");
-                admin.setEmail("admin@admin.com");
-                admin.setPassword(passwordEncoder.encode("admin123"));
-
-                Role adminRole = roleRepository.findByRoleName(AppRole.ROLE_ADMIN)
-                        .orElseThrow(() -> new RuntimeException("Error: Admin Role is not found."));
-                admin.setRoles(Set.of(adminRole));
-
-                userRepository.save(admin);
-            }
-        };
-    }
 }
