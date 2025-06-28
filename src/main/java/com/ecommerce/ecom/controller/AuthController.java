@@ -85,6 +85,9 @@ public class AuthController {
                     roles
             );
 
+            // Include the user's email in the response so the frontend can display it
+            response.setEmail(userDetails.getEmail());
+
             return ResponseEntity.ok()
                     .header(HttpHeaders.SET_COOKIE, jwtCookie.toString())
                     .body(response);
@@ -173,6 +176,9 @@ public class AuthController {
 
         UserInfoResponse response = new UserInfoResponse(userDetails.getId(),
                 userDetails.getUsername(), roles);
+
+        // Include the user's email in the response so the frontend can display it
+        response.setEmail(userDetails.getEmail());
 
         return ResponseEntity.ok().body(response);
     }
