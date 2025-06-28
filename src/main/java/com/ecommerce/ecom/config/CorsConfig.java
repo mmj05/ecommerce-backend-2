@@ -13,18 +13,27 @@ public class CorsConfig {
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         CorsConfiguration config = new CorsConfiguration();
 
-        // Allow all origins or specify your React app's URL
+        // Allow specific origins (add all possible development URLs)
         config.addAllowedOrigin("http://localhost:5173"); // Vite's default port
-        config.addAllowedOrigin("http://localhost:3000"); // In case you use a different port
+        config.addAllowedOrigin("http://localhost:3000");  // React's default port
+        config.addAllowedOrigin("http://127.0.0.1:5173");  // Alternative localhost
+        config.addAllowedOrigin("http://127.0.0.1:3000");  // Alternative localhost
 
-        // Allow all HTTP methods (GET, POST, PUT, DELETE, etc.)
+        // Allow all HTTP methods
         config.addAllowedMethod("*");
 
-        // Allow all headers
+        // Allow all headers (including custom headers)
         config.addAllowedHeader("*");
 
-        // Allow cookies and authentication headers
+        // CRITICAL: Allow credentials (cookies, authorization headers, etc.)
         config.setAllowCredentials(true);
+
+        // Set max age for preflight cache
+        config.setMaxAge(3600L);
+
+        // Allow specific headers in responses
+        config.addExposedHeader("Set-Cookie");
+        config.addExposedHeader("Authorization");
 
         source.registerCorsConfiguration("/**", config);
         return new CorsFilter(source);
