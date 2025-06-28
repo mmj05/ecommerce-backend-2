@@ -34,8 +34,10 @@ public class JwtUtils {
     public String getJwtFromCookies(HttpServletRequest request) {
         Cookie cookie = WebUtils.getCookie(request, jwtCookie);
         if (cookie != null) {
+            logger.debug("Found JWT cookie: {}", cookie.getValue());
             return cookie.getValue();
         } else {
+            logger.debug("No JWT cookie found");
             return null;
         }
     }
@@ -47,18 +49,25 @@ public class JwtUtils {
     public ResponseCookie generateJwtCookie(UserDetailsImpl userPrincipal, long expirationMs) {
         String jwt = generateTokenFromUsername(userPrincipal.getUsername(), expirationMs);
         ResponseCookie cookie = ResponseCookie.from(jwtCookie, jwt)
-                .path("/api")
+                .path("/")  // Changed from "/api" to "/" to cover all paths
                 .maxAge(expirationMs / 1000) // Convert from ms to seconds
                 .httpOnly(true)
-                .secure(true)  // Enable for HTTPS
-                .sameSite("Strict")  // CSRF protection
+                .secure(false)  // Changed to false for localhost HTTP development
+                .sameSite("Lax")  // Changed from "Strict" to "Lax" for better cross-origin support
                 .build();
+
+        logger.info("Generated JWT cookie: name={}, path=/, secure=false, sameSite=Lax, maxAge={} seconds",
+                jwtCookie, expirationMs / 1000);
         return cookie;
     }
 
     public ResponseCookie getCleanJwtCookie() {
         ResponseCookie cookie = ResponseCookie.from(jwtCookie, null)
-                .path("/api")
+                .path("/")  // Changed from "/api" to "/"
+                .maxAge(0)  // Explicitly set maxAge to 0 for immediate expiration
+                .httpOnly(true)
+                .secure(false)  // Match the generation settings
+                .sameSite("Lax")
                 .build();
         return cookie;
     }
