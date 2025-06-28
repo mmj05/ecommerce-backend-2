@@ -32,7 +32,7 @@ import java.util.Set;
 
 @Configuration
 @EnableWebSecurity
-@EnableMethodSecurity(prePostEnabled = true) // Enable method-level security
+@EnableMethodSecurity(prePostEnabled = true)
 public class WebSecurityConfig {
     @Autowired
     UserDetailsServiceImpl userDetailsService;
@@ -48,10 +48,8 @@ public class WebSecurityConfig {
     @Bean
     public DaoAuthenticationProvider authenticationProvider() {
         DaoAuthenticationProvider authProvider = new DaoAuthenticationProvider();
-
         authProvider.setUserDetailsService(userDetailsService);
         authProvider.setPasswordEncoder(passwordEncoder());
-
         return authProvider;
     }
 
@@ -69,111 +67,78 @@ public class WebSecurityConfig {
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http.cors(cors -> cors.configurationSource(request -> {
                     CorsConfiguration configuration = new CorsConfiguration();
-                    configuration.setAllowedOrigins(Arrays.asList("http://localhost:5173", "http://localhost:3000"));
-                    configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+                    // Allow multiple localhost origins for development
+                    configuration.setAllowedOrigins(Arrays.asList(
+                            "http://localhost:5173",
+                            "http://localhost:3000",
+                            "http://127.0.0.1:5173",
+                            "http://127.0.0.1:3000"
+                    ));
+                    configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"));
                     configuration.setAllowedHeaders(Arrays.asList("*"));
                     configuration.setAllowCredentials(true);
+                    configuration.setMaxAge(3600L);
+                    // Expose headers that might be needed by the frontend
+                    configuration.setExposedHeaders(Arrays.asList("Set-Cookie", "Authorization"));
                     return configuration;
                 }))
                 .csrf(csrf -> csrf.disable())
                 .exceptionHandling(exception -> exception.authenticationEntryPoint(unauthorizedHandler))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth ->
-                        auth.requestMatchers("/api/auth/**").permitAll()
+                        // Allow unauthenticated CORS pre-flight requests
+                        auth.requestMatchers(org.springframework.http.HttpMethod.OPTIONS, "/**").permitAll()
+                                .requestMatchers("/api/auth/**").permitAll()
+                                .requestMatchers("/api/public/**").permitAll()
                                 .requestMatchers("/v3/api-docs/**").permitAll()
                                 .requestMatchers("/h2-console/**").permitAll()
                                 .requestMatchers("/api/admin/**").hasAnyRole("ADMIN", "SELLER")
-                                .requestMatchers("/api/seller/**").hasAnyRole("SELLER", "ADMIN")
-                                .requestMatchers("/api/public/**").permitAll()
-                                .requestMatchers("/swagger-ui/**").permitAll()
-                                .requestMatchers("/api/test/**").permitAll()
-                                .requestMatchers("/images/**").permitAll()
-                                .anyRequest().authenticated()
-                );
+                                .requestMatchers("/api/seller/**").hasRole("SELLER")
+                                .requestMatchers("/api/order/**").hasAnyRole("USER", "ADMIN", "SELLER")
+                                .requestMatchers("/api/orders/**").hasAnyRole("USER", "ADMIN", "SELLER")
+                                .requestMatchers("/api/profile/**").hasAnyRole("USER", "ADMIN", "SELLER")
+                                .anyRequest().authenticated());
 
         http.authenticationProvider(authenticationProvider());
         http.addFilterBefore(authenticationJwtTokenFilter(), UsernamePasswordAuthenticationFilter.class);
-        http.headers(headers -> headers.frameOptions(frameOptions -> frameOptions.sameOrigin()));
 
         return http.build();
     }
 
     @Bean
     public WebSecurityCustomizer webSecurityCustomizer() {
-        return (web -> web.ignoring().requestMatchers("/v2/api-docs",
-                "/configuration/ui",
-                "/swagger-resources/**",
-                "/configuration/security",
-                "/swagger-ui.html",
-                "/webjars/**"));
+        return (web) -> web.ignoring()
+                .requestMatchers("/h2-console/**")
+                .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html");
     }
 
     @Bean
     public CommandLineRunner initData(RoleRepository roleRepository, UserRepository userRepository, PasswordEncoder passwordEncoder) {
         return args -> {
-            // Retrieve or create roles
-            Role userRole = roleRepository.findByRoleName(AppRole.ROLE_USER)
-                    .orElseGet(() -> {
-                        Role newUserRole = new Role(AppRole.ROLE_USER);
-                        return roleRepository.save(newUserRole);
-                    });
-
-            Role sellerRole = roleRepository.findByRoleName(AppRole.ROLE_SELLER)
-                    .orElseGet(() -> {
-                        Role newSellerRole = new Role(AppRole.ROLE_SELLER);
-                        return roleRepository.save(newSellerRole);
-                    });
-
-            Role adminRole = roleRepository.findByRoleName(AppRole.ROLE_ADMIN)
-                    .orElseGet(() -> {
-                        Role newAdminRole = new Role(AppRole.ROLE_ADMIN);
-                        return roleRepository.save(newAdminRole);
-                    });
-
-            Set<Role> userRoles = Set.of(userRole);
-            Set<Role> sellerRoles = Set.of(sellerRole, userRole);
-            Set<Role> adminRoles = Set.of(userRole, sellerRole, adminRole);
-
-            // Create users if not already present
-            if (!userRepository.existsByUsername("user1")) {
-                User user1 = new User("user1", "user1@example.com", passwordEncoder.encode("password1"));
-                user1.setRoles(userRoles);
-                userRepository.save(user1);
+            // Initialize default roles if they don't exist
+            if (roleRepository.findByRoleName(AppRole.ROLE_USER).isEmpty()) {
+                roleRepository.save(new Role(AppRole.ROLE_USER));
+            }
+            if (roleRepository.findByRoleName(AppRole.ROLE_ADMIN).isEmpty()) {
+                roleRepository.save(new Role(AppRole.ROLE_ADMIN));
+            }
+            if (roleRepository.findByRoleName(AppRole.ROLE_SELLER).isEmpty()) {
+                roleRepository.save(new Role(AppRole.ROLE_SELLER));
             }
 
-            if (!userRepository.existsByUsername("seller1")) {
-                User seller1 = new User("seller1", "seller1@example.com", passwordEncoder.encode("password2"));
-                seller1.setRoles(sellerRoles);
-                userRepository.save(seller1);
-            }
-
+            // Create default admin user if not exists
             if (!userRepository.existsByUsername("admin")) {
-                User admin = new User("admin", "admin@example.com", passwordEncoder.encode("adminPass"));
-                admin.setRoles(adminRoles);
+                User admin = new User();
+                admin.setUsername("admin");
+                admin.setEmail("admin@admin.com");
+                admin.setPassword(passwordEncoder.encode("admin123"));
+
+                Role adminRole = roleRepository.findByRoleName(AppRole.ROLE_ADMIN)
+                        .orElseThrow(() -> new RuntimeException("Error: Admin Role is not found."));
+                admin.setRoles(Set.of(adminRole));
+
                 userRepository.save(admin);
             }
-
-            // Update roles for existing users if they don't have roles set
-            userRepository.findByUsername("user1").ifPresent(user -> {
-                if (user.getRoles().isEmpty()) {
-                    user.setRoles(userRoles);
-                    userRepository.save(user);
-                }
-            });
-
-            userRepository.findByUsername("seller1").ifPresent(seller -> {
-                if (seller.getRoles().isEmpty()) {
-                    seller.setRoles(sellerRoles);
-                    userRepository.save(seller);
-                }
-            });
-
-            userRepository.findByUsername("admin").ifPresent(admin -> {
-                if (admin.getRoles().isEmpty()) {
-                    admin.setRoles(adminRoles);
-                    userRepository.save(admin);
-                }
-            });
         };
     }
 }
