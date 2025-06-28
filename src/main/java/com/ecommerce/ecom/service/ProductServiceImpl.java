@@ -8,6 +8,7 @@ import com.ecommerce.ecom.payload.ProductDTO;
 import com.ecommerce.ecom.payload.ProductResponse;
 import com.ecommerce.ecom.repositories.CartRepository;
 import com.ecommerce.ecom.repositories.CategoryRepository;
+import com.ecommerce.ecom.repositories.OrderItemRepository;
 import com.ecommerce.ecom.repositories.ProductRepository;
 import com.ecommerce.ecom.util.AuthUtil;
 import org.modelmapper.ModelMapper;
@@ -25,7 +26,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.util.List;
 
-@Service
+@Service("productService")
 public class ProductServiceImpl implements ProductService {
 
     @Autowired
@@ -48,6 +49,9 @@ public class ProductServiceImpl implements ProductService {
 
     @Autowired
     private AuthUtil authUtil;
+
+    @Autowired
+    private OrderItemRepository orderItemRepository;
 
     @Value("${project.image}")
     private String path;
@@ -158,6 +162,11 @@ public class ProductServiceImpl implements ProductService {
         // Check if current user can delete this product
         if (!canCurrentUserDeleteProduct(productId)) {
             throw new APIException("You are not authorized to delete this product");
+        }
+
+        // If the product has been part of any completed orders we must not delete it due to FK constraints
+        if (orderItemRepository.existsByProduct(product)) {
+            throw new APIException("Cannot delete this product because it has already been ordered by at least one customer");
         }
 
         List<Cart> carts = cartRepository.findCartsByProductId(productId);
